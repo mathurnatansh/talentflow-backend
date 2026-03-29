@@ -6,7 +6,8 @@ import json
 
 # Fetching the key explicitly prevents the 30-second crash loop on Render
 api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-client = genai.Client(api_key=api_key) if api_key else genai.Client()
+# Use 'v1' specifically as Render's environment may default v1beta to inconsistent aliases
+client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'}) if api_key else genai.Client()
 
 def parse_job_description(jd_text: str) -> JobRequirements:
     """
