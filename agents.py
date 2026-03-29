@@ -1,17 +1,36 @@
 import os
 import json
+import logging
 from google import genai
 from google.genai import types
 from models import JobRequirements, ProfiledCandidate, FinalRecommendation, CandidateKPIs
 
-# Fetching the key explicitly prevents the 30-second crash loop on Render
-api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-client = genai.Client(api_key=api_key) if api_key else genai.Client()
+# Configure logging for better debugging in Render dashboard
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Lazy initialization of the client to avoid crashing at import time
+_client = None
+
+def get_client():
+    global _client
+    if _client is None:
+        api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            logger.error("CRITICAL: GEMINI_API_KEY is not set in environment!")
+            # Fallback to default if absolutely necessary, but this might crash if no ADC
+            _client = genai.Client()
+        else:
+            # We use the key explicitly. We don't force 'v1' here unless flash fails.
+            _client = genai.Client(api_key=api_key)
+    return _client
 
 def safe_generate_content(prompt: str, system_instruction: str, response_schema):
     """
-    Helper to attempt gen-ai with a fallback to the pro model if flash fails.
+    Indestructible generation helper with automated Flash -> Pro fallback.
     """
+    client = get_client()
+    
     config_flash = types.GenerateContentConfig(
         system_instruction=system_instruction,
         response_mime_type="application/json",
@@ -20,43 +39,48 @@ def safe_generate_content(prompt: str, system_instruction: str, response_schema)
     )
     
     try:
-        # Attempt 1: Fast Flash
-        model_name = 'gemini-1.5-flash'
+        # Attempt 1: Fast Flash (using v1beta internally)
+        logger.info("Attempting evaluation with gemini-1.5-flash...")
         response = client.models.generate_content(
-            model=model_name,
+            model='gemini-1.5-flash',
             contents=prompt,
             config=config_flash,
         )
         return response.text
     except Exception as e:
-        print(f"Flash model failed, falling back to Pro: {e}")
-        # Attempt 2: Stable Pro (More resilient to certain identifier issues)
+        logger.warning(f"Flash model failed or not found: {e}. Falling back to Gemini Pro...")
+        
+        # Attempt 2: Stable Pro
+        # We explicitly use gemini-1.5-pro which is highly stable for structured schemas.
         config_pro = types.GenerateContentConfig(
             system_instruction=system_instruction,
             response_mime_type="application/json",
             response_schema=response_schema,
             temperature=0.1
         )
-        response = client.models.generate_content(
-            model='gemini-1.5-pro',
-            contents=prompt,
-            config=config_pro,
-        )
-        return response.text
+        
+        try:
+            response = client.models.generate_content(
+                model='gemini-1.5-pro',
+                contents=prompt,
+                config=config_pro,
+            )
+            return response.text
+        except Exception as e2:
+            logger.error(f"Critical AI Failure: Both Flash and Pro failed: {e2}")
+            raise RuntimeError(f"AI evaluation failed on both models. Error: {e2}")
 
 def parse_job_description(jd_text: str) -> JobRequirements:
     """
     Agent 1: Job Parsing Agent
     """
     system_instruction = (
-        "You are the Job Parsing Agent. You are meticulous and highly detail-oriented. "
-        "Transform job descriptions into structured requirements."
+        "You are the Job Parsing Agent. Extract skills, necessities, and experience from the JD."
     )
-    prompt = f"Please extract core necessities, soft skills, and experience metrics from this JD:\n\n{jd_text}"
+    prompt = f"Extract requirements from:\n\n{jd_text}"
     
     result_text = safe_generate_content(prompt, system_instruction, JobRequirements)
     return JobRequirements.model_validate_json(result_text)
-
 
 def profile_candidate(
     candidate_id: str,
@@ -68,17 +92,10 @@ def profile_candidate(
     Agent 2: Candidate Profiling Agent
     """
     system_instruction = (
-        "You are the Candidate Profiling Agent. Rate the candidate on Speed, Fit, Risk, and Impact."
+        "You are the Candidate Profiling Agent. Evaluate metrics for Speed, Fit, Risk, and Impact."
     )
-    
     status = "Internal" if is_internal else "External"
-    prompt = f"""
-    Evaluate the following {status} candidate:
-    Job Requirements: {jd.model_dump_json()}
-    
-    Candidate CV Text:
-    {cv_text}
-    """
+    prompt = f"Evaluate {status} candidate vs JD: {jd.model_dump_json()}\n\nCV: {cv_text}"
     
     result_text = safe_generate_content(prompt, system_instruction, ProfiledCandidate)
     parsed = ProfiledCandidate.model_validate_json(result_text)
@@ -90,19 +107,16 @@ def scenario_evaluation(scenario_type: str, candidates: list[ProfiledCandidate])
     """
     Agent 3: Scenario Agent
     """
-    system_instruction = "You are the Scenario Agent. Apply mathematical fairness."
+    system_instruction = "You are the Scenario Agent. Apply mathematical +5% scenario modifiers."
     
-    if "urgen" in scenario_type.lower():  
-        scenario_rules = "URGENT HIRE: +5% score bonus to INTERNAL candidates."
+    if "urgen" in scenario_type.lower():
+        scenario_rules = "URGENT HIRE: Apply +5% to Internal candidates."
     elif "transform" in scenario_type.lower():
-        scenario_rules = "TRANSFORMATION: +5% score bonus to EXTERNAL candidates."
+        scenario_rules = "TRANSFORMATION: Apply +5% to External candidates. Sort by Fit/Impact."
     else:
-        scenario_rules = "STRATEGIC GROWTH: Purely equal comparison."
+        scenario_rules = "STRATEGIC: Pure evaluation."
 
-    prompt = f"""
-    Scenario: {scenario_rules}
-    Candidates: {[c.model_dump() for c in candidates]}
-    """
+    prompt = f"Scenario: {scenario_rules}\nCandidates: {[c.model_dump() for c in candidates]}"
     
     result_text = safe_generate_content(prompt, system_instruction, FinalRecommendation)
     return FinalRecommendation.model_validate_json(result_text)
