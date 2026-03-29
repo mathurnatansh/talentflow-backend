@@ -4,8 +4,9 @@ from google.genai import types
 from models import JobRequirements, ProfiledCandidate, FinalRecommendation, CandidateKPIs
 import json
 
-# Ensure you have GEMINI_API_KEY in your env
-client = genai.Client()
+# Fetching the key explicitly prevents the 30-second crash loop on Render
+api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
 def parse_job_description(jd_text: str) -> JobRequirements:
     """
