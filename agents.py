@@ -28,7 +28,7 @@ def parse_job_description(jd_text: str) -> JobRequirements:
     )
     
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-1.5-flash',
         contents=prompt,
         config=config,
     )
@@ -82,7 +82,7 @@ def profile_candidate(
     )
     
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-1.5-flash',
         contents=prompt,
         config=config,
     )
@@ -131,7 +131,7 @@ def scenario_evaluation(scenario_type: str, candidates: list[ProfiledCandidate])
     )
     
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-1.5-flash',
         contents=prompt,
         config=config,
     )
