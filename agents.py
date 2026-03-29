@@ -106,11 +106,11 @@ def scenario_evaluation(scenario_type: str, candidates: list[ProfiledCandidate])
     
     # Detailed scenario constraints
     if "urgen" in scenario_type.lower():  
-        scenario_rules = "URGENT HIRE (Mathematical Weights): Speed (50%), Fit (40%), Risk (10%), Impact (0%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
+        scenario_rules = "URGENT HIRE (Fair +5% Modifier): Evaluate all candidates mathematically equally across all 4 metrics. However, you MUST give a literal +5% total score bonus to any INTERNAL candidate to account for their inherent absolute speed advantage before ranking them."
     elif "transform" in scenario_type.lower():
-        scenario_rules = "TRANSFORMATION (Mathematical Weights): Impact (40%), Fit (40%), Speed (10%), Risk (10%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math. Furthermore, if an external candidate mathematically ties an internal one, external breaks the tie."
+        scenario_rules = "TRANSFORMATION (Fair +5% Modifier): Evaluate candidates strictly on their FIT and IMPACT equally. Ignore speed and risk. However, you MUST give a literal +5% total score bonus to any EXTERNAL candidate to promote fresh perspectives before ranking them."
     else:
-        scenario_rules = "STRATEGIC (Mathematical Weights): Fit (50%), Impact (50%), Speed (0%), Risk (0%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
+        scenario_rules = "STRATEGIC GROWTH (Fair 0% Modifier): Evaluate all candidates mathematically equally across all 4 metrics. Do NOT give any point bonuses to internal or external candidates. Recommend purely on highest total true score."
 
     prompt = f"""
     You have {len(candidates)} profiled candidates.
