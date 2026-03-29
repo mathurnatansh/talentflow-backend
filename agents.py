@@ -105,15 +105,12 @@ def scenario_evaluation(scenario_type: str, candidates: list[ProfiledCandidate])
     )
     
     # Detailed scenario constraints
-    scenario_rules = ""
     if "urgen" in scenario_type.lower():  
-        # Handles user typo 'urgen' vs 'urgent'
-        scenario_rules = "URGENT HIRE: Internal person gets high preference. External will only be recommended if they are extremely good on other parameters."
+        scenario_rules = "URGENT HIRE (Mathematical Weights): Speed (40%), Risk (30%), Fit (20%), Impact (10%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
     elif "transform" in scenario_type.lower():
-        scenario_rules = "TRANSFORMATION: Hiring for a fresh perspective. Give preference to external candidates. Recommend internal only if parameters are exceptionally good."
+        scenario_rules = "TRANSFORMATION (Mathematical Weights): Impact (40%), Fit (30%), Speed (15%), Risk (15%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
     else:
-        # Defaulting to Strategic essentially
-        scenario_rules = "STRATEGIC: The candidate recommended should be a perfect fit on the metrics of IMPACT and FIT, regardless of internal/external."
+        scenario_rules = "STRATEGIC (Mathematical Weights): Fit (40%), Impact (40%), Speed (10%), Risk (10%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
 
     prompt = f"""
     You have {len(candidates)} profiled candidates.
