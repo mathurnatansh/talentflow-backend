@@ -106,11 +106,11 @@ def scenario_evaluation(scenario_type: str, candidates: list[ProfiledCandidate])
     
     # Detailed scenario constraints
     if "urgen" in scenario_type.lower():  
-        scenario_rules = "URGENT HIRE (Rank-Based Sort): You MUST recommend the candidate with the absolute highest SPEED score. Ignore all other parameters to ensure 100% mathematical fairness on speed."
+        scenario_rules = "URGENT HIRE (Mathematical Weights): Speed (50%), Fit (40%), Risk (10%), Impact (0%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
     elif "transform" in scenario_type.lower():
-        scenario_rules = "TRANSFORMATION (Rank-Based Sort): You MUST recommend the highest-scoring EXTERNAL candidate over any Internal candidate based on completely fair averages of all metrics."
+        scenario_rules = "TRANSFORMATION (Mathematical Weights): Impact (40%), Fit (40%), Speed (10%), Risk (10%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math. Furthermore, if an external candidate mathematically ties an internal one, external breaks the tie."
     else:
-        scenario_rules = "STRATEGIC GROWTH (Rank-Based Sort): You MUST recommend the candidate with the highest combined FIT and IMPACT scores. Ignore all other metrics to ensure metric-driven fairness."
+        scenario_rules = "STRATEGIC (Mathematical Weights): Fit (50%), Impact (50%), Speed (0%), Risk (0%). Multiply the profiled candidate's 1-10 scores by these percentages to absolutely neutrally and fairly determine the best total score, treating all internal and external candidates equally based strictly on the math."
 
     prompt = f"""
     You have {len(candidates)} profiled candidates.
