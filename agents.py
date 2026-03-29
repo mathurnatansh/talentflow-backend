@@ -1,41 +1,61 @@
 import os
+import json
 from google import genai
 from google.genai import types
 from models import JobRequirements, ProfiledCandidate, FinalRecommendation, CandidateKPIs
-import json
 
 # Fetching the key explicitly prevents the 30-second crash loop on Render
 api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-# Use 'v1' specifically as Render's environment may default v1beta to inconsistent aliases
-client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'}) if api_key else genai.Client()
+client = genai.Client(api_key=api_key) if api_key else genai.Client()
+
+def safe_generate_content(prompt: str, system_instruction: str, response_schema):
+    """
+    Helper to attempt gen-ai with a fallback to the pro model if flash fails.
+    """
+    config_flash = types.GenerateContentConfig(
+        system_instruction=system_instruction,
+        response_mime_type="application/json",
+        response_schema=response_schema,
+        temperature=0.1
+    )
+    
+    try:
+        # Attempt 1: Fast Flash
+        model_name = 'gemini-1.5-flash'
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=config_flash,
+        )
+        return response.text
+    except Exception as e:
+        print(f"Flash model failed, falling back to Pro: {e}")
+        # Attempt 2: Stable Pro (More resilient to certain identifier issues)
+        config_pro = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
+            response_schema=response_schema,
+            temperature=0.1
+        )
+        response = client.models.generate_content(
+            model='gemini-1.5-pro',
+            contents=prompt,
+            config=config_pro,
+        )
+        return response.text
 
 def parse_job_description(jd_text: str) -> JobRequirements:
     """
     Agent 1: Job Parsing Agent
-    Persona: Calm, analytical, methodical librarian.
     """
     system_instruction = (
-        "You are the Job Parsing Agent. You are meticulous and highly detail-oriented, like a diligent "
-        "researcher or librarian. Your personality is calm, analytical, and methodical, ensuring that no "
-        "requirement or nuance is overlooked when transforming job descriptions into structured requirements."
+        "You are the Job Parsing Agent. You are meticulous and highly detail-oriented. "
+        "Transform job descriptions into structured requirements."
     )
+    prompt = f"Please extract core necessities, soft skills, and experience metrics from this JD:\n\n{jd_text}"
     
-    prompt = f"Please extract the core necessities, soft skills, and experience metrics from the following Job Description:\n\n{jd_text}"
-    
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-        response_mime_type="application/json",
-        response_schema=JobRequirements
-    )
-    
-    response = client.models.generate_content(
-        model='gemini-1.5-flash',
-        contents=prompt,
-        config=config,
-    )
-    
-    # generate_content with a response_schema typically returns the raw text as JSON which we then parse.
-    return JobRequirements.model_validate_json(response.text)
+    result_text = safe_generate_content(prompt, system_instruction, JobRequirements)
+    return JobRequirements.model_validate_json(result_text)
 
 
 def profile_candidate(
@@ -46,50 +66,22 @@ def profile_candidate(
 ) -> ProfiledCandidate:
     """
     Agent 2: Candidate Profiling Agent
-    Persona: Balanced, empathetic thoughtful career advisor.
     """
     system_instruction = (
-        "You are the Candidate Profiling Agent. You are balanced, empathetic, and insightful, like a thoughtful career advisor. "
-        "You see the whole person behind a resume, weighing strengths, risks, and potential with fairness. "
-        "Your personality is supportive yet objective, offering a balanced view on who might fit best. "
-        "Rate the candidate heavily on four KPIs: Speed (start time), Fit (match to JD), Risk (internal/external factors), Impact (historical & predicted)."
+        "You are the Candidate Profiling Agent. Rate the candidate on Speed, Fit, Risk, and Impact."
     )
     
     status = "Internal" if is_internal else "External"
     prompt = f"""
-    Evaluate the following {status} candidate against the structured Job Requirements.
-    Remember that Internal candidates generally have better 'Speed' to start, lower onboarding 'Risk', but might lack 'Impact' of fresh perspectives.
-    External candidates might have high 'Risk' but high 'Impact' depending on their CV.
+    Evaluate the following {status} candidate:
+    Job Requirements: {jd.model_dump_json()}
     
-    **Job Requirements**:
-    {jd.model_dump_json(indent=2)}
-    
-    **Candidate Status**: {status}
-    
-    **Candidate CV Text**:
+    Candidate CV Text:
     {cv_text}
-    
-    Extract their name and provide the full profile evaluation.
     """
     
-    # We must construct a schema that includes candidate_id, since the model won't have it, 
-    # but the simplest way is to ask the model just to return name, KPIs, etc., and then we add ID.
-    # To keep it strict, we define a small wrapper or just instruct it.
-    
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-        response_mime_type="application/json",
-        response_schema=ProfiledCandidate
-    )
-    
-    response = client.models.generate_content(
-        model='gemini-1.5-flash',
-        contents=prompt,
-        config=config,
-    )
-    
-    parsed = ProfiledCandidate.model_validate_json(response.text)
-    # Ensure ID is correct
+    result_text = safe_generate_content(prompt, system_instruction, ProfiledCandidate)
+    parsed = ProfiledCandidate.model_validate_json(result_text)
     parsed.candidate_id = candidate_id
     parsed.is_internal = is_internal
     return parsed
@@ -97,44 +89,20 @@ def profile_candidate(
 def scenario_evaluation(scenario_type: str, candidates: list[ProfiledCandidate]) -> FinalRecommendation:
     """
     Agent 3: Scenario Agent
-    Persona: Cautious, pragmatic, protective team steward.
     """
-    system_instruction = (
-        "You are the Scenario Agent. You are cautious and pragmatic, almost like a protective team steward. "
-        "Your personality leans conservative, prioritizing stability and internal continuity unless external options show clear, long-term value. "
-        "You are skeptical of unnecessary change, ensuring decisions favor team balance and risk mitigation."
-    )
+    system_instruction = "You are the Scenario Agent. Apply mathematical fairness."
     
-    # Detailed scenario constraints
     if "urgen" in scenario_type.lower():  
-        scenario_rules = "URGENT HIRE (Fair +5% Modifier): Evaluate all candidates mathematically equally across all 4 metrics. However, you MUST give a literal +5% total score bonus to any INTERNAL candidate to account for their inherent absolute speed advantage before ranking them."
+        scenario_rules = "URGENT HIRE: +5% score bonus to INTERNAL candidates."
     elif "transform" in scenario_type.lower():
-        scenario_rules = "TRANSFORMATION (Fair +5% Modifier): Evaluate candidates strictly on their FIT and IMPACT equally. Ignore speed and risk. However, you MUST give a literal +5% total score bonus to any EXTERNAL candidate to promote fresh perspectives before ranking them."
+        scenario_rules = "TRANSFORMATION: +5% score bonus to EXTERNAL candidates."
     else:
-        scenario_rules = "STRATEGIC GROWTH (Fair 0% Modifier): Evaluate all candidates mathematically equally across all 4 metrics. Do NOT give any point bonuses to internal or external candidates. Recommend purely on highest total true score."
+        scenario_rules = "STRATEGIC GROWTH: Purely equal comparison."
 
     prompt = f"""
-    You have {len(candidates)} profiled candidates.
-    Evaluate them based on this specific Scenario: {scenario_rules}
-    
-    **Candidate Profiles**:
-    {[c.model_dump() for c in candidates]}
-    
-    Make your final recommendation, ranking them, and detailing trade-offs.
-    Return ONLY a single valid JSON matching the requested format.
+    Scenario: {scenario_rules}
+    Candidates: {[c.model_dump() for c in candidates]}
     """
     
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-        response_mime_type="application/json",
-        response_schema=FinalRecommendation,
-        temperature=0.2 # Lower temperature for pragmatic logic
-    )
-    
-    response = client.models.generate_content(
-        model='gemini-1.5-flash',
-        contents=prompt,
-        config=config,
-    )
-    
-    return FinalRecommendation.model_validate_json(response.text)
+    result_text = safe_generate_content(prompt, system_instruction, FinalRecommendation)
+    return FinalRecommendation.model_validate_json(result_text)
